@@ -1,0 +1,670 @@
+import React, { useState, useMemo } from 'react';
+import { 
+  Calculator, 
+  TrendingDown, 
+  Calendar, 
+  IndianRupee, 
+  PieChart, 
+  Download, 
+  RefreshCw,
+  Settings,
+  ArrowRight,
+  TrendingUp,
+  Info,
+  Clock
+} from 'lucide-react';
+
+// --- Utility Functions ---
+
+const formatCurrency = (value) => {
+  if (isNaN(value)) return "₹0";
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(value);
+};
+
+const formatCompactCurrency = (value) => {
+  if (isNaN(value)) return "₹0";
+  const formatter = new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 1,
+    notation: "compact"
+  });
+  return formatter.format(value);
+};
+
+const numberToWords = (num) => {
+  if (!num || isNaN(num)) return "";
+  num = parseInt(num);
+  if (num === 0) return "Zero Rupees";
+
+  const single = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"];
+  const double = ["Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+  const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+  
+  function translate(n) {
+      if (n < 10) return single[n];
+      if (n < 20) return double[n - 10];
+      return tens[Math.floor(n / 10)] + (n % 10 !== 0 ? " " + single[n % 10] : "");
+  }
+  
+  function translateHundreds(n) {
+      if (n < 100) return translate(n);
+      return single[Math.floor(n / 100)] + " Hundred" + (n % 100 !== 0 ? " " + translate(n % 100) : "");
+  }
+
+  let str = "";
+  let crore = Math.floor(num / 10000000);
+  num %= 10000000;
+  if (crore > 0) str += translateHundreds(crore) + " Crore ";
+  
+  let lakh = Math.floor(num / 100000);
+  num %= 100000;
+  if (lakh > 0) str += translate(lakh) + " Lakh ";
+  
+  let thousand = Math.floor(num / 1000);
+  num %= 1000;
+  if (thousand > 0) str += translate(thousand) + " Thousand ";
+  
+  if (num > 0) str += translateHundreds(num);
+  
+  return str.trim() + " Rupees";
+};
+
+// --- Components ---
+
+const Card = ({ children, className = "" }) => (
+  <div className={`bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden ${className}`}>
+    {children}
+  </div>
+);
+
+const SectionTitle = ({ icon: Icon, title, subtitle }) => (
+  <div className="mb-6">
+    <div className="flex items-center gap-2 mb-1">
+      <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600">
+        <Icon size={20} />
+      </div>
+      <h2 className="text-lg font-bold text-slate-800">{title}</h2>
+    </div>
+    {subtitle && <p className="text-slate-500 text-sm ml-11">{subtitle}</p>}
+  </div>
+);
+
+const InputField = ({ label, value, onChange, type = "number", prefix, suffix, helpText }) => (
+  <div className="mb-4">
+    <label className="block text-sm font-medium text-slate-700 mb-1.5">{label}</label>
+    <div className="relative rounded-xl shadow-sm">
+      {prefix && (
+        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+          <span className="text-slate-500 sm:text-sm font-semibold">{prefix}</span>
+        </div>
+      )}
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onWheel={(e) => e.target.blur()} 
+        className={`block w-full rounded-xl border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all py-2.5 sm:text-sm font-medium ${prefix ? 'pl-8' : 'pl-3'} ${suffix ? 'pr-12' : 'pr-3'}`}
+      />
+      {suffix && (
+        <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+          <span className="text-slate-400 sm:text-sm">{suffix}</span>
+        </div>
+      )}
+    </div>
+    {helpText && (
+      <p className="mt-1.5 text-xs text-slate-500 font-medium italic animate-in fade-in slide-in-from-top-1 duration-300">
+        {helpText}
+      </p>
+    )}
+  </div>
+);
+
+const Toggle = ({ options, selected, onChange }) => (
+  <div className="flex bg-slate-100 p-1 rounded-xl w-full">
+    {options.map((opt) => (
+      <button
+        key={opt.value}
+        onClick={() => onChange(opt.value)}
+        className={`flex-1 py-2 px-3 text-sm font-medium rounded-lg transition-all ${
+          selected === opt.value
+            ? 'bg-white text-indigo-600 shadow-sm'
+            : 'text-slate-500 hover:text-slate-700'
+        }`}
+      >
+        {opt.label}
+      </button>
+    ))}
+  </div>
+);
+
+// --- Chart Component ---
+
+const BalanceChart = ({ originalData, smartData }) => {
+  const maxBalance = originalData.length > 0 ? originalData[0].balance : 100;
+  const maxMonths = Math.max(originalData.length, smartData.length);
+  const width = 100;
+  const height = 50;
+
+  const getPoints = (data) => {
+    if (!data || data.length === 0) return "";
+    return data.map((d, i) => {
+      const x = (i / (maxMonths - 1)) * width;
+      const y = height - ((d.balance / maxBalance) * height); 
+      return `${x},${y}`;
+    }).join(" ");
+  };
+
+  const originalPoints = getPoints(originalData);
+  const smartPoints = getPoints(smartData);
+
+  return (
+    <div className="relative h-48 w-full mt-4 bg-slate-50 rounded-xl border border-slate-100 overflow-hidden">
+      <div className="absolute top-4 right-4 z-10 bg-white/80 backdrop-blur-sm p-2 rounded-lg border border-slate-100 shadow-sm">
+        <div className="flex items-center gap-2 text-xs font-medium">
+          <span className="block w-2 h-2 rounded-full bg-slate-400"></span>
+          <span className="text-slate-600">Original Balance</span>
+        </div>
+        <div className="flex items-center gap-2 text-xs font-medium mt-1">
+          <span className="block w-2 h-2 rounded-full bg-emerald-500"></span>
+          <span className="text-emerald-700">New Balance</span>
+        </div>
+      </div>
+      
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full p-4" preserveAspectRatio="none">
+        <defs>
+            <linearGradient id="chartGradient" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor="#10b981" stopOpacity="0.2" />
+                <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
+            </linearGradient>
+        </defs>
+        <line x1="0" y1={height} x2={width} y2={height} stroke="#e2e8f0" strokeWidth="0.5" />
+        <line x1="0" y1="0" x2="0" y2={height} stroke="#e2e8f0" strokeWidth="0.5" />
+        <polyline
+          fill="none"
+          stroke="#94a3b8"
+          strokeWidth="1.5"
+          strokeDasharray="3 3"
+          points={originalPoints}
+          vectorEffect="non-scaling-stroke"
+        />
+        <polygon
+          fill="url(#chartGradient)"
+          points={`0,${height} ${smartPoints} ${width * (smartData.length/maxMonths)},${height}`}
+        />
+        <polyline
+          fill="none"
+          stroke="#10b981"
+          strokeWidth="2"
+          points={smartPoints}
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+    </div>
+  );
+};
+
+// --- Main Application ---
+
+export default function App() {
+  // --- State ---
+  const [loanAmount, setLoanAmount] = useState(5000000); 
+  const [interestRate, setInterestRate] = useState(9); 
+  const [tenure, setTenure] = useState(25); 
+  const [tenureType, setTenureType] = useState('years'); 
+  
+  // Smart Reducer State
+  const [extraPayment, setExtraPayment] = useState(42000);
+  const [frequency, setFrequency] = useState('yearly'); 
+  const [strategy, setStrategy] = useState('reduce-tenure'); 
+  const [startMonth, setStartMonth] = useState(1);
+
+  // New Step-Up State
+  const [isStepUp, setIsStepUp] = useState(false);
+  const [stepUpAmount, setStepUpAmount] = useState(0);
+
+  // --- Calculation Logic ---
+  
+  const amountWords = useMemo(() => numberToWords(loanAmount), [loanAmount]);
+
+  const calculatePMT = (rate, nper, pv) => {
+    if (rate === 0) return pv / nper;
+    return (pv * rate * Math.pow(1 + rate, nper)) / (Math.pow(1 + rate, nper) - 1);
+  };
+
+  const calculateSchedule = (isSmart = false) => {
+    const principal = parseFloat(loanAmount) || 0;
+    const ratePerMonth = (parseFloat(interestRate) || 0) / 12 / 100;
+    const totalMonths = tenureType === 'years' ? (parseFloat(tenure) || 0) * 12 : parseFloat(tenure) || 0;
+    
+    if (principal <= 0 || totalMonths <= 0) return { schedule: [], totalInterest: 0, baseEMI: 0 };
+
+    const baseEMI = calculatePMT(ratePerMonth, totalMonths, principal);
+
+    let balance = principal;
+    let currentEMI = baseEMI;
+    let totalInterest = 0;
+    let schedule = [];
+    
+    // Step Up Tracking
+    let currentStepUpAccumulated = 0;
+
+    const maxLoops = totalMonths * 2; 
+
+    for (let month = 1; month <= maxLoops; month++) {
+      let interest = balance * ratePerMonth;
+      
+      // Step Up Application (Every 12 months, increase monthly commitment)
+      if (isSmart && isStepUp && month > 1 && (month - 1) % 12 === 0) {
+        currentStepUpAccumulated += parseFloat(stepUpAmount);
+      }
+
+      // Base Monthly Payment starts with standard EMI + any step-up increases
+      let monthlyPayment = currentEMI + currentStepUpAccumulated;
+      
+      let extra = 0;
+
+      // Add "Extra Payment" on top of the (possibly stepped-up) monthly payment
+      if (isSmart && extraPayment > 0 && month >= startMonth) {
+         if (frequency === 'one-time' && month === parseInt(startMonth)) extra = parseFloat(extraPayment);
+         if (frequency === 'monthly') extra = parseFloat(extraPayment);
+         if (frequency === 'yearly' && (month - startMonth) % 12 === 0) extra = parseFloat(extraPayment);
+      }
+
+      // Handle closeout
+      if (balance + interest <= monthlyPayment + extra) {
+          // Final month adjustment
+          let totalRequired = balance + interest;
+          monthlyPayment = totalRequired - extra; // Attribute remaining to standard payment first
+          if (monthlyPayment < 0) {
+            monthlyPayment = 0;
+            extra = totalRequired;
+          }
+      }
+
+      let principalComponent = monthlyPayment - interest;
+      
+      // Total Principal Paid = (Standard Principal + StepUp Principal) + (Extra Payment)
+      let totalPrincipalPaid = principalComponent + extra;
+      
+      if (totalPrincipalPaid > balance) {
+          totalPrincipalPaid = balance;
+          // Reverse engineer breakdown for display accuracy
+          // Not strictly necessary for math, but good for table
+      }
+
+      balance -= totalPrincipalPaid;
+      totalInterest += interest;
+
+      schedule.push({
+        month,
+        emi: monthlyPayment, // This includes Base EMI + StepUp
+        interest,
+        principalBase: principalComponent, // The portion of the EMI covering principal
+        principalTotal: totalPrincipalPaid, // The ACTUAL reduction in balance (Base + Extra)
+        extraPaid: extra,
+        balance: balance > 0.1 ? balance : 0 
+      });
+
+      if (balance <= 0.1) break;
+
+      // If 'Reduce EMI' strategy is active, we recalculate the BASE EMI.
+      // Note: Step-up is usually a 'Reduce Tenure' strategy by definition (paying more).
+      // If we mix Step-Up + Reduce EMI, it gets complex. 
+      // Here, we assume Step-Up primarily drives tenure reduction, but if 'reduce-emi' is flagged 
+      // for the "Extra Payment" part, we recalculate.
+      if (isSmart && strategy === 'reduce-emi' && extra > 0) {
+          const remainingMonths = totalMonths - month;
+          if (remainingMonths > 0) {
+              // Recalculate Base EMI on new balance
+              currentEMI = calculatePMT(ratePerMonth, remainingMonths, balance);
+              // Reset step up? No, Step Up usually implies permanent increase in capacity.
+              // We'll keep step up accumulated.
+          }
+      } 
+    }
+    
+    return { schedule, totalInterest, baseEMI };
+  };
+
+  const original = useMemo(() => calculateSchedule(false), [loanAmount, interestRate, tenure, tenureType]);
+  const smart = useMemo(() => calculateSchedule(true), [loanAmount, interestRate, tenure, tenureType, extraPayment, frequency, strategy, startMonth, isStepUp, stepUpAmount]);
+
+  // --- Derived Stats ---
+  const originalTotalPayment = parseFloat(loanAmount) + original.totalInterest;
+  const smartTotalPayment = parseFloat(loanAmount) + smart.totalInterest;
+  const savings = originalTotalPayment - smartTotalPayment;
+  const monthsReduced = original.schedule.length - smart.schedule.length;
+
+  const formatTenure = (totalMonths) => {
+    const years = Math.floor(totalMonths / 12);
+    const months = totalMonths % 12;
+    if (years === 0) return `${months} Months`;
+    if (months === 0) return `${years} Years`;
+    return `${years} Yrs ${months} Mos`;
+  };
+  
+  const downloadCSV = () => {
+    const headers = ["Month,Total Payment,Interest,Total Principal Paid,Balance"];
+    const rows = smart.schedule.map(row => 
+      `${row.month},${(row.emi + row.extraPaid).toFixed(2)},${row.interest.toFixed(2)},${row.principalTotal.toFixed(2)},${row.balance.toFixed(2)}`
+    );
+    const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "smart_loan_schedule_inr.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Helper for Smart EMI Display
+  const renderSmartEMIDisplay = () => {
+    const extra = parseFloat(extraPayment) || 0;
+    
+    if (strategy === 'reduce-emi' && extra > 0) {
+        const lastEMI = smart.schedule.length > 0 ? smart.schedule[smart.schedule.length - 1].emi : 0;
+        return (
+            <div>
+                <span>{formatCurrency(lastEMI)}</span>
+                <span className="text-xs text-slate-400 font-normal ml-1">(Final EMI)</span>
+            </div>
+        );
+    }
+    
+    if (frequency === 'monthly' && extra > 0) {
+        return (
+            <div>
+                 <span>{formatCurrency(original.baseEMI + extra)}</span>
+                 <span className="text-sm font-normal text-slate-400">/mo</span>
+            </div>
+        );
+    }
+    
+    return (
+        <div className="flex flex-col">
+            <div>
+                <span>{formatCurrency(original.baseEMI)}</span>
+                <span className="text-sm font-normal text-slate-400">/mo</span>
+            </div>
+            <div className="flex flex-wrap gap-2 mt-1">
+              {extra > 0 && (
+                  <span className="text-[11px] font-medium text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                      + {formatCompactCurrency(extra)} ({frequency})
+                  </span>
+              )}
+              {isStepUp && parseFloat(stepUpAmount) > 0 && (
+                  <span className="text-[11px] font-medium text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
+                      + {formatCompactCurrency(stepUpAmount)}/yr Step-Up
+                  </span>
+              )}
+            </div>
+        </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-12">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="bg-indigo-600 p-2 rounded-lg text-white">
+              <Calculator size={20} />
+            </div>
+            <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-emerald-600">
+              EMIHelper
+            </h1>
+          </div>
+          <button onClick={() => window.location.reload()} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500">
+            <RefreshCw size={18} />
+          </button>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          
+          {/* LEFT COLUMN: Controls */}
+          <div className="lg:col-span-4 space-y-6">
+            <Card className="p-6">
+              <SectionTitle icon={Settings} title="Loan Details" subtitle="Enter your current loan terms" />
+              <InputField 
+                label="Loan Amount (₹)" value={loanAmount} onChange={setLoanAmount} prefix="₹" helpText={amountWords}
+              />
+              <div className="grid grid-cols-2 gap-4">
+                <InputField label="Interest Rate" value={interestRate} onChange={setInterestRate} suffix="%" />
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Tenure</label>
+                  <div className="flex">
+                    <input
+                      type="number"
+                      value={tenure}
+                      onChange={(e) => setTenure(e.target.value)}
+                      className="block w-full rounded-l-xl border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 py-2.5 pl-3"
+                    />
+                    <select
+                      value={tenureType}
+                      onChange={(e) => setTenureType(e.target.value)}
+                      className="rounded-r-xl border-l-0 border-slate-200 bg-slate-100 text-sm font-medium text-slate-600 px-3 focus:ring-indigo-500 focus:border-indigo-500"
+                    >
+                      <option value="years">Years</option>
+                      <option value="months">Months</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </Card>
+
+            {/* Smart Reducer Controls */}
+            <Card className="p-6 border-indigo-100 shadow-indigo-100/50">
+              <SectionTitle icon={TrendingDown} title="Smart Reducer" subtitle="Strategies to save interest" />
+              
+              <div className="space-y-6">
+                {/* 1. Standard Extra Payment */}
+                <div>
+                    <h3 className="text-sm font-semibold text-slate-800 mb-3 flex items-center gap-2">
+                        <Calendar size={16} className="text-slate-400"/> Extra Payments
+                    </h3>
+                    <div className="space-y-4 pl-2 border-l-2 border-slate-100">
+                        <InputField 
+                        label="Amount (₹)" value={extraPayment} onChange={setExtraPayment} prefix="₹" 
+                        />
+                        <Toggle 
+                        selected={frequency} onChange={setFrequency}
+                        options={[
+                            { label: 'Monthly', value: 'monthly' },
+                            { label: 'Yearly', value: 'yearly' },
+                            { label: 'One-Time', value: 'one-time' },
+                        ]} 
+                        />
+                        {(frequency === 'one-time' || frequency === 'yearly') && (
+                        <InputField label={frequency === 'one-time' ? "Pay in Month #" : "Starts from Month #"} value={startMonth} onChange={setStartMonth} />
+                        )}
+                        
+                        <div className="bg-slate-50 p-3 rounded-lg">
+                           <label className="block text-xs font-semibold text-slate-500 uppercase mb-2">Benefit Type</label>
+                           <Toggle 
+                            selected={strategy} onChange={setStrategy}
+                            options={[
+                                { label: 'Reduce Tenure', value: 'reduce-tenure' },
+                                { label: 'Reduce EMI', value: 'reduce-emi' },
+                            ]} 
+                            />
+                        </div>
+                    </div>
+                </div>
+
+                {/* 2. Step Up Option */}
+                <div>
+                     <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                            <TrendingUp size={16} className="text-slate-400"/> Annual Step-Up
+                        </h3>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" checked={isStepUp} onChange={(e) => setIsStepUp(e.target.checked)} className="sr-only peer" />
+                            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                        </label>
+                     </div>
+                     
+                     {isStepUp && (
+                         <div className="pl-2 border-l-2 border-indigo-100 animate-in slide-in-from-top-2 duration-200">
+                             <InputField 
+                                label="Increase EMI Annually by (₹)" 
+                                value={stepUpAmount} 
+                                onChange={setStepUpAmount} 
+                                prefix="₹" 
+                                helpText="Your monthly EMI will increase by this amount every 12 months."
+                             />
+                         </div>
+                     )}
+                </div>
+
+              </div>
+            </Card>
+          </div>
+
+          {/* RIGHT COLUMN: Results */}
+          <div className="lg:col-span-8 space-y-6">
+            
+            {/* Top Stats Comparison */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Card className="p-6 bg-white border-l-4 border-l-slate-300">
+                <div className="flex justify-between items-start mb-4">
+                    <div>
+                        <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Original Loan</p>
+                        <h3 className="text-2xl font-bold text-slate-800 mt-1">{formatCurrency(original.baseEMI)}<span className="text-sm font-normal text-slate-400">/mo</span></h3>
+                    </div>
+                    <div className="p-2 bg-slate-100 rounded-lg text-slate-600">
+                        <IndianRupee size={20} />
+                    </div>
+                </div>
+                <div className="space-y-2 border-t border-slate-100 pt-3">
+                    <div className="flex justify-between text-sm">
+                        <span className="text-slate-500">Total Interest</span>
+                        <span className="font-semibold text-slate-700">{formatCompactCurrency(original.totalInterest)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                        <span className="text-slate-500">Duration</span>
+                        <span className="font-semibold text-slate-700">{original.schedule.length} Months</span>
+                    </div>
+                </div>
+              </Card>
+
+              <Card className={`p-6 border-l-4 transition-colors ${savings > 0 ? 'border-l-emerald-500 bg-emerald-50/20' : 'border-l-slate-300'}`}>
+                <div className="flex justify-between items-start mb-4">
+                    <div>
+                        <p className="text-emerald-700 text-xs font-bold uppercase tracking-wider flex items-center gap-1">
+                           Smart Loan {savings > 0 && <TrendingDown size={14} />}
+                        </p>
+                        <h3 className="text-2xl font-bold text-slate-800 mt-1">
+                          {renderSmartEMIDisplay()}
+                        </h3>
+                    </div>
+                    <div className="p-2 bg-emerald-100 rounded-lg text-emerald-700">
+                        <PieChart size={20} />
+                    </div>
+                </div>
+
+                {savings > 0 ? (
+                    <div className="space-y-2 border-t border-emerald-100 pt-3">
+                         <div className="flex justify-between text-sm">
+                            <span className="text-emerald-800 font-medium">Interest Saved</span>
+                            <span className="font-bold text-emerald-700">-{formatCompactCurrency(savings)}</span>
+                        </div>
+                        {/* NEW: Effective Tenure Display */}
+                        <div className="flex justify-between text-sm">
+                            <span className="text-emerald-800 font-medium">New Tenure</span>
+                            <span className="font-bold text-emerald-700">{formatTenure(smart.schedule.length)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                            <span className="text-emerald-800 font-medium">Time Saved</span>
+                            <span className="font-bold text-emerald-700">-{monthsReduced} Months</span>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="pt-3 border-t border-slate-100 text-sm text-slate-500">
+                        Add extra payments or step-up to see savings.
+                    </div>
+                )}
+              </Card>
+            </div>
+
+            {/* Visualisation Area */}
+            <Card className="p-6">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-slate-800">Balance Amortization</h3>
+                    <div className="text-sm text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+                       {monthsReduced > 0 ? `${monthsReduced} months faster` : 'Standard Schedule'}
+                    </div>
+                </div>
+                <BalanceChart originalData={original.schedule} smartData={smart.schedule} />
+            </Card>
+
+            {/* Amortization Table */}
+            <Card className="overflow-hidden">
+                <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                    <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-slate-800">Schedule Details</h3>
+                        <div className="group relative">
+                             <Info size={16} className="text-slate-400 cursor-help" />
+                             <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block w-64 p-2 bg-slate-800 text-white text-xs rounded shadow-lg z-50">
+                                 Balance reduces by "Total Principal Paid" (which includes your extra payments). Interest is the cost of borrowing and does not reduce the balance.
+                             </div>
+                        </div>
+                    </div>
+                    <button 
+                        onClick={downloadCSV}
+                        className="flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-700 transition-colors bg-white border border-slate-200 px-3 py-1.5 rounded-lg shadow-sm"
+                    >
+                        <Download size={14} /> Export CSV
+                    </button>
+                </div>
+                <div className="overflow-x-auto max-h-[500px] overflow-y-auto custom-scrollbar">
+                    <table className="w-full text-sm text-left">
+                        <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0 z-20 shadow-sm">
+                            <tr>
+                                <th className="px-4 py-3 font-semibold whitespace-nowrap">Month</th>
+                                <th className="px-4 py-3 font-semibold text-right whitespace-nowrap text-indigo-700 bg-indigo-50/50">Total Payment</th>
+                                <th className="px-4 py-3 font-semibold text-right whitespace-nowrap text-slate-500">Interest</th>
+                                <th className="px-4 py-3 font-semibold text-right whitespace-nowrap text-emerald-700 bg-emerald-50/50">Total Principal Paid</th>
+                                <th className="px-4 py-3 font-semibold text-right whitespace-nowrap">Balance</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {smart.schedule.map((row) => (
+                                <tr key={row.month} className={`hover:bg-slate-50 transition-colors ${row.extraPaid > 0 ? 'bg-emerald-50/20' : ''}`}>
+                                    <td className="px-4 py-3 font-medium text-slate-700">{row.month}</td>
+                                    <td className="px-4 py-3 text-right font-medium text-indigo-900 bg-indigo-50/10">
+                                        {formatCurrency(row.emi + row.extraPaid)}
+                                    </td>
+                                    <td className="px-4 py-3 text-right text-slate-500">{formatCurrency(row.interest)}</td>
+                                    <td className="px-4 py-3 text-right font-bold text-emerald-700 bg-emerald-50/10">
+                                        {formatCurrency(row.principalTotal)}
+                                        {row.extraPaid > 0 && (
+                                            <span className="block text-[10px] font-normal text-emerald-500 leading-none mt-0.5">
+                                                (Base + Extra)
+                                            </span>
+                                        )}
+                                    </td>
+                                    <td className="px-4 py-3 text-right font-medium text-slate-700">{formatCurrency(row.balance)}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </Card>
+
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+
